@@ -1,27 +1,50 @@
-// Main entry point for the D3 Chart Schema system
+// Main entry point for the Canonical D3 Chart Schema system
+export { CanonicalChartSchema } from './types/canonical-schema';
+export { CanonicalChartRenderer } from './renderer/canonical-renderer';
+export { CanonicalChartSystem } from './canonical-system';
+export { canonicalExamples } from './examples/canonical-examples';
+
+// Re-export D3 for convenience
+export * as d3 from 'd3';
+
+// Legacy exports for backward compatibility
 export { ChartSchema, ChartType, MarkConfig, ScaleConfig } from './types/chart-schema';
 export { ChartRenderer } from './renderer/chart-renderer';
 export { ChartFactory } from './utils/chart-factory';
 export { chartExamples, getExampleByType, getAvailableChartTypes } from './examples/chart-examples';
 
-// Re-export D3 for convenience
-export * as d3 from 'd3';
-
-// Main API for creating charts
+// Main API - now uses canonical system
 export class D3ChartSystem {
   /**
-   * Create a chart from a complete schema
+   * Create any chart from canonical schema - no chart-type logic
    */
-  static async createChart(container: SVGElement, schema: ChartSchema): Promise<ChartRenderer> {
-    return ChartFactory.createChart(container, schema);
+  static async createChart(container: SVGElement, schema: CanonicalChartSchema): Promise<CanonicalChartRenderer> {
+    return CanonicalChartSystem.createChart(container, schema);
   }
 
   /**
-   * Create a chart from data and basic configuration
+   * Create chart from data with automatic schema generation
+   */
+  static async createFromData(
+    container: SVGElement,
+    data: any[],
+    options: {
+      type?: string;
+      title?: string;
+      width?: number;
+      height?: number;
+      encoding?: Record<string, string>;
+    } = {}
+  ): Promise<CanonicalChartRenderer> {
+    return CanonicalChartSystem.createFromData(container, data, options);
+  }
+
+  /**
+   * Legacy method - converts to canonical schema
    */
   static async createSimpleChart(
     container: SVGElement,
-    chartType: ChartType,
+    chartType: string,
     data: any[],
     options: {
       xField?: string;
@@ -31,75 +54,42 @@ export class D3ChartSystem {
       width?: number;
       height?: number;
     } = {}
-  ): Promise<ChartRenderer> {
-    const schema = ChartFactory.generateSchemaFromData(data, chartType, options);
-    return ChartFactory.createChart(container, schema);
+  ): Promise<CanonicalChartRenderer> {
+    const encoding: Record<string, string> = {};
+    if (options.xField) encoding.x = options.xField;
+    if (options.yField) encoding.y = options.yField;
+    if (options.colorField) encoding.color = options.colorField;
+    
+    return this.createFromData(container, data, {
+      type: chartType,
+      title: options.title,
+      width: options.width,
+      height: options.height,
+      encoding
+    });
   }
 
   /**
-   * Create multiple charts in a dashboard layout
+   * Get all available examples
    */
-  static async createDashboard(
-    containerSelector: string,
-    charts: Array<{
-      schema: ChartSchema;
-      containerId: string;
-    }>
-  ): Promise<ChartRenderer[]> {
-    return ChartFactory.createDashboard(containerSelector, charts);
+  static getExamples(): Record<string, CanonicalChartSchema> {
+    return CanonicalChartSystem.getExamples();
   }
 
   /**
-   * Get available chart types
+   * Validate canonical schema
    */
-  static getChartTypes(): string[] {
-    return getAvailableChartTypes();
+  static validateSchema(schema: CanonicalChartSchema): { valid: boolean; errors: string[]; warnings?: string[] } {
+    return CanonicalChartSystem.validateSchema(schema);
   }
 
   /**
-   * Get example schema for a chart type
+   * Generate schema from data analysis
    */
-  static getExample(chartType: string): ChartSchema | null {
-    return getExampleByType(chartType);
-  }
-
-  /**
-   * Validate a chart schema
-   */
-  static validateSchema(schema: ChartSchema): { valid: boolean; errors: string[] } {
-    const errors: string[] = [];
-
-    // Basic validation
-    if (!schema.id) errors.push('Schema must have an id');
-    if (!schema.type) errors.push('Schema must have a type');
-    if (!schema.data) errors.push('Schema must have data configuration');
-    if (!schema.dimensions) errors.push('Schema must have dimensions');
-    if (!schema.marks || schema.marks.length === 0) errors.push('Schema must have at least one mark');
-
-    // Data validation
-    if (schema.data) {
-      if (!schema.data.source) errors.push('Data must have a source');
-      if (!schema.data.fields || schema.data.fields.length === 0) {
-        errors.push('Data must have field definitions');
-      }
-    }
-
-    // Dimensions validation
-    if (schema.dimensions) {
-      if (!schema.dimensions.width || schema.dimensions.width <= 0) {
-        errors.push('Dimensions must have a positive width');
-      }
-      if (!schema.dimensions.height || schema.dimensions.height <= 0) {
-        errors.push('Dimensions must have a positive height');
-      }
-    }
-
-    return {
-      valid: errors.length === 0,
-      errors
-    };
+  static generateSchemaFromData(data: any[], options: any = {}): CanonicalChartSchema {
+    return CanonicalChartSystem.generateSchemaFromData(data, options);
   }
 }
 
-// Default export
-export default D3ChartSystem;
+// Default export - canonical system
+export default CanonicalChartSystem;
