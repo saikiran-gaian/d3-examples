@@ -2407,7 +2407,6 @@ export function getCompleteSchemaByType(type: string): CanonicalChartSchema | nu
 }
 
 // Merge with main schemas
-export const allChartSchemas = {
-  ...chartSchemas,
+export const allChartSchemas =
   ...completeChartSchemas
 };
