@@ -12,6 +12,7 @@ export class CanonicalChartRenderer {
   private dataCache: Map<string, any[]> = new Map();
   private generators: Map<string, any> = new Map();
   private state: Map<string, any> = new Map();
+  private simulation: any = null;
 
   constructor(container: SVGElement, schema: CanonicalChartSchema) {
     this.container = d3.select(container);
@@ -19,29 +20,44 @@ export class CanonicalChartRenderer {
   }
 
   async render(): Promise<void> {
-    // Clear previous content
+    try {
+      // Clear previous content
+      this.container.selectAll('*').remove();
+      
+      // Setup visual space
+      this.setupVisualSpace();
+      
+      // Process data pipeline
+      await this.processDataPipeline();
+      
+      // Create all scales
+      this.createScales();
+      
+      // Create generators
+      this.createGenerators();
+      
+      // Render layers in order
+      await this.renderLayers();
+      
+      // Apply behaviors
+      this.applyBehaviors();
+      
+      // Start animations
+      this.startAnimations();
+    } catch (error) {
+      console.error('Rendering error:', error);
+      this.renderError(error);
+    }
+  }
+
+  private renderError(error: any): void {
     this.container.selectAll('*').remove();
-    
-    // Setup visual space
-    this.setupVisualSpace();
-    
-    // Process data pipeline
-    await this.processDataPipeline();
-    
-    // Create all scales
-    this.createScales();
-    
-    // Create generators
-    this.createGenerators();
-    
-    // Render layers in order
-    await this.renderLayers();
-    
-    // Apply behaviors
-    this.applyBehaviors();
-    
-    // Start animations
-    this.startAnimations();
+    this.container.append('text')
+      .attr('x', this.schema.space.width / 2)
+      .attr('y', this.schema.space.height / 2)
+      .attr('text-anchor', 'middle')
+      .attr('fill', 'red')
+      .text(`Error: ${error.message}`);
   }
 
   private setupVisualSpace(): void {
@@ -120,50 +136,17 @@ export class CanonicalChartRenderer {
       case 'inline':
         return Array.isArray(source.data) ? source.data : [source.data];
       
-      case 'url':
-        return this.loadFromUrl(source.url, source.format, source.options);
-      
-      case 'file':
-        return this.loadFromUrl(source.url, source.format, source.options);
-      
       case 'generated':
         return this.generateData(source.options || {});
       
-      case 'computed':
-        return this.computeData(source.options || {});
-      
       default:
-        throw new Error(`Unsupported data source type: ${source.type}`);
+        // For demo, return empty array
+        return [];
     }
-  }
-
-  private async loadFromUrl(url: string, format?: string, options?: any): Promise<any[]> {
-    const inferredFormat = format || this.inferFormat(url);
-    
-    switch (inferredFormat) {
-      case 'json':
-        return d3.json(url);
-      case 'csv':
-        return d3.csv(url, options?.row);
-      case 'tsv':
-        return d3.tsv(url, options?.row);
-      case 'topojson':
-        const topology = await d3.json(url);
-        return options?.feature ? 
-          (topology as any).objects[options.feature] : 
-          topology;
-      default:
-        return d3.json(url);
-    }
-  }
-
-  private inferFormat(url: string): string {
-    const extension = url.split('.').pop()?.toLowerCase();
-    return extension || 'json';
   }
 
   private generateData(options: any): any[] {
-    const { count = 100, type = 'random', ...params } = options;
+    const { count = 50, type = 'random', ...params } = options;
     const data = [];
     
     for (let i = 0; i < count; i++) {
@@ -174,7 +157,10 @@ export class CanonicalChartRenderer {
             y: Math.random() * 100,
             category: `Category ${Math.floor(Math.random() * 5) + 1}`,
             value: Math.random() * 1000,
-            index: i
+            index: i,
+            id: `item-${i}`,
+            group: Math.floor(Math.random() * 3) + 1,
+            size: Math.random() * 20 + 5
           });
           break;
         
@@ -182,26 +168,38 @@ export class CanonicalChartRenderer {
           data.push({
             date: new Date(2020, 0, i),
             value: Math.random() * 100 + Math.sin(i * 0.1) * 20,
-            index: i
+            index: i,
+            category: `Series ${Math.floor(i / 10) + 1}`
           });
           break;
         
         case 'network':
-          // Generate network data
+          if (i < 20) {
+            data.push({
+              id: `node-${i}`,
+              group: Math.floor(i / 5) + 1,
+              size: Math.random() * 10 + 5
+            });
+          }
           break;
         
         case 'hierarchy':
-          // Generate hierarchical data
+          // Generate hierarchical structure
+          break;
+        
+        case 'alphabet':
+          const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+          if (i < 26) {
+            data.push({
+              letter: letters[i],
+              frequency: Math.random() * 0.12 + 0.01
+            });
+          }
           break;
       }
     }
     
     return data;
-  }
-
-  private computeData(options: any): any[] {
-    // Compute data from other data sources or state
-    return [];
   }
 
   private async applyTransform(data: any[], transform: any): Promise<any[]> {
@@ -218,15 +216,10 @@ export class CanonicalChartRenderer {
       case 'group':
         return Array.from(d3.group(data, d => this.getValue(d, params.by)));
       
-      case 'rollup':
-        return Array.from(d3.rollup(data, params.reducer, d => this.getValue(d, params.by)));
-      
       case 'stack':
         const stack = d3.stack()
           .keys(params.keys)
-          .value((d: any, key: string) => this.getValue(d, key))
-          .order(params.order ? d3[params.order as keyof typeof d3] as any : null)
-          .offset(params.offset ? d3[params.offset as keyof typeof d3] as any : null);
+          .value((d: any, key: string) => this.getValue(d, key) || 0);
         return stack(data);
       
       case 'bin':
@@ -236,37 +229,82 @@ export class CanonicalChartRenderer {
         return bin(data.map(d => this.getValue(d, params.field)));
       
       case 'hierarchy':
-        return d3.hierarchy(data, params.children)
-          .sum(params.value ? d => this.getValue(d, params.value) : null)
-          .sort(params.sort || null);
+        const hierarchy = d3.hierarchy(data, params.children)
+          .sum(params.value ? d => this.getValue(d, params.value) : null);
+        if (params.sort) hierarchy.sort(params.sort);
+        return hierarchy;
+      
+      case 'partition':
+        const partition = d3.partition()
+          .size(params.size || [2 * Math.PI, 100]);
+        return partition(data);
+      
+      case 'treemap':
+        const treemap = d3.treemap()
+          .size(params.size || [400, 300])
+          .padding(params.padding || 1);
+        return treemap(data);
+      
+      case 'pack':
+        const pack = d3.pack()
+          .size(params.size || [400, 400])
+          .padding(params.padding || 3);
+        return pack(data);
       
       case 'force':
-        // Setup force simulation data
-        return this.setupForceData(data, params);
+        return this.setupForceSimulation(data, params);
       
-      case 'projection':
-        // Apply geographic projection
-        return this.applyProjection(data, params);
-      
-      case 'contour':
-        // Generate contour data
-        return this.generateContours(data, params);
-      
-      case 'voronoi':
-        // Generate Voronoi diagram
-        return this.generateVoronoi(data, params);
-      
-      case 'delaunay':
-        // Generate Delaunay triangulation
-        return this.generateDelaunay(data, params);
+      case 'pie':
+        const pie = d3.pie()
+          .value(d => this.getValue(d, params.value || 'value'));
+        if (params.sort === null) pie.sort(null);
+        return pie(data);
       
       default:
-        // Custom transform - execute if function provided
-        if (params.transform && typeof params.transform === 'function') {
-          return params.transform(data, params);
-        }
         return data;
     }
+  }
+
+  private setupForceSimulation(data: any, params: any): any {
+    const nodes = data.nodes || data;
+    const links = data.links || [];
+    
+    this.simulation = d3.forceSimulation(nodes);
+    
+    if (params.forces) {
+      Object.entries(params.forces).forEach(([forceType, forceParams]: [string, any]) => {
+        let force: any;
+        
+        switch (forceType) {
+          case 'link':
+            force = d3.forceLink(links).id((d: any) => d.id);
+            if (forceParams.distance) force.distance(forceParams.distance);
+            if (forceParams.strength) force.strength(forceParams.strength);
+            break;
+          case 'manyBody':
+            force = d3.forceManyBody();
+            if (forceParams.strength) force.strength(forceParams.strength);
+            break;
+          case 'center':
+            force = d3.forceCenter(forceParams.x || 0, forceParams.y || 0);
+            break;
+          case 'x':
+            force = d3.forceX(forceParams.x || 0);
+            if (forceParams.strength) force.strength(forceParams.strength);
+            break;
+          case 'y':
+            force = d3.forceY(forceParams.y || 0);
+            if (forceParams.strength) force.strength(forceParams.strength);
+            break;
+        }
+        
+        if (force) {
+          this.simulation.force(forceType, force);
+        }
+      });
+    }
+    
+    return { nodes, links };
   }
 
   private createScales(): void {
@@ -285,8 +323,8 @@ export class CanonicalChartRenderer {
     if (config.domain) {
       scale.domain(config.domain);
     } else if (config.domainFrom) {
-      const data = this.dataCache.get(config.domainFrom.data) || this.dataCache.get('main');
-      const values = data.map(d => this.getValue(d, config.domainFrom!.field));
+      const data = this.dataCache.get(config.domainFrom.data) || this.dataCache.get('main') || [];
+      const values = data.map(d => this.getValue(d, config.domainFrom!.field)).filter(v => v != null);
       let domain: any[];
       
       switch (config.domainFrom.method) {
@@ -308,7 +346,9 @@ export class CanonicalChartRenderer {
             d3.extent(values) as any[];
       }
       
-      scale.domain(domain);
+      if (domain[0] !== undefined && domain[1] !== undefined) {
+        scale.domain(domain);
+      }
     }
 
     // Configure range
@@ -318,15 +358,15 @@ export class CanonicalChartRenderer {
 
     // Apply color schemes
     if (config.scheme && 'range' in scale) {
-      const scheme = d3[`scheme${config.scheme}` as keyof typeof d3] as any;
+      const scheme = (d3 as any)[`scheme${config.scheme}`];
       if (scheme) {
-        scale.range(scheme);
+        scale.range(Array.isArray(scheme) ? scheme : scheme[Math.min(scheme.length - 1, 9)]);
       }
     }
 
     // Apply interpolators
     if (config.interpolator && 'interpolator' in scale) {
-      const interpolator = d3[config.interpolator as keyof typeof d3] as any;
+      const interpolator = (d3 as any)[config.interpolator];
       if (interpolator) {
         scale.interpolator(interpolator);
       }
@@ -374,7 +414,8 @@ export class CanonicalChartRenderer {
       'threshold': () => d3.scaleThreshold(),
       'quantile': () => d3.scaleQuantile(),
       'quantize': () => d3.scaleQuantize(),
-      'identity': () => d3.scaleIdentity()
+      'identity': () => d3.scaleIdentity(),
+      'radial': () => d3.scaleRadial()
     };
 
     return scaleMap[type] || (() => d3.scaleLinear());
@@ -382,10 +423,10 @@ export class CanonicalChartRenderer {
 
   private createGenerators(): void {
     // Pre-create any generators needed by marks
-    this.schema.layers.forEach(layer => {
+    this.schema.layers.forEach((layer, index) => {
       if (layer.mark.generator) {
         const generator = this.createGenerator(layer.mark.generator);
-        this.generators.set(layer.id || `layer-${Math.random()}`, generator);
+        this.generators.set(layer.id || `layer-${index}`, generator);
       }
     });
   }
@@ -396,12 +437,12 @@ export class CanonicalChartRenderer {
     const generatorMap: Record<string, () => any> = {
       'line': () => {
         const line = d3.line();
-        if (curve) line.curve(d3[curve as keyof typeof d3] as any);
+        if (curve) line.curve((d3 as any)[curve] || d3.curveLinear);
         return line;
       },
       'area': () => {
         const area = d3.area();
-        if (curve) area.curve(d3[curve as keyof typeof d3] as any);
+        if (curve) area.curve((d3 as any)[curve] || d3.curveLinear);
         return area;
       },
       'arc': () => d3.arc(),
@@ -412,9 +453,7 @@ export class CanonicalChartRenderer {
       'pack': () => d3.pack(),
       'treemap': () => d3.treemap(),
       'partition': () => d3.partition(),
-      'sankey': () => (d3 as any).sankey?.() || null,
       'chord': () => d3.chord(),
-      'force': () => d3.forceSimulation(),
       'symbol': () => d3.symbol(),
       'path': () => d3.geoPath()
     };
@@ -424,15 +463,6 @@ export class CanonicalChartRenderer {
     if (generator && params) {
       // Apply all parameters generically
       Object.entries(params).forEach(([key, value]) => {
-        if (generator[key] && typeof generator[key] === 'function') {
-          generator[key](value);
-        }
-      });
-    }
-
-    if (generator && layout) {
-      // Apply layout parameters
-      Object.entries(layout).forEach(([key, value]) => {
         if (generator[key] && typeof generator[key] === 'function') {
           generator[key](value);
         }
@@ -497,6 +527,17 @@ export class CanonicalChartRenderer {
   ): Promise<void> {
     const { type, params = {}, generator, groupBy, key } = mark;
 
+    // Handle special mark types
+    if (type === 'axis') {
+      this.renderAxis(container, encoding, params);
+      return;
+    }
+
+    if (type === 'grid') {
+      this.renderGrid(container, encoding, params);
+      return;
+    }
+
     // Group data if specified
     let groups: Array<[string, any[]]>;
     if (groupBy && groupBy.length > 0) {
@@ -512,6 +553,72 @@ export class CanonicalChartRenderer {
     }
   }
 
+  private renderAxis(container: any, encoding: any, params: any): void {
+    const scaleName = encoding.scale?.value;
+    const scale = this.scales.get(scaleName);
+    if (!scale) return;
+
+    const orient = params.orient || 'bottom';
+    let axis: any;
+
+    switch (orient) {
+      case 'top': axis = d3.axisTop(scale); break;
+      case 'bottom': axis = d3.axisBottom(scale); break;
+      case 'left': axis = d3.axisLeft(scale); break;
+      case 'right': axis = d3.axisRight(scale); break;
+      default: axis = d3.axisBottom(scale);
+    }
+
+    if (params.ticks) axis.ticks(params.ticks);
+    if (params.tickFormat) axis.tickFormat(params.tickFormat);
+    if (params.tickSize) axis.tickSize(params.tickSize);
+
+    const position = encoding.position?.value || [0, 0];
+    container.append('g')
+      .attr('class', `axis axis-${orient}`)
+      .attr('transform', `translate(${position[0]}, ${position[1]})`)
+      .call(axis);
+  }
+
+  private renderGrid(container: any, encoding: any, params: any): void {
+    const xScale = this.scales.get('x');
+    const yScale = this.scales.get('y');
+    const { width, height, margin = { top: 20, right: 20, bottom: 40, left: 40 } } = this.schema.space;
+    
+    const innerWidth = width - (margin.left || 0) - (margin.right || 0);
+    const innerHeight = height - (margin.top || 0) - (margin.bottom || 0);
+
+    const gridGroup = container.append('g')
+      .attr('class', 'grid')
+      .attr('stroke', params.stroke || '#e0e0e0')
+      .attr('stroke-width', params.strokeWidth || 0.5)
+      .attr('opacity', params.opacity || 0.5);
+
+    // Vertical grid lines
+    if (xScale && params.x !== false) {
+      gridGroup.append('g')
+        .selectAll('line')
+        .data(xScale.ticks ? xScale.ticks() : xScale.domain())
+        .join('line')
+        .attr('x1', (d: any) => xScale(d))
+        .attr('x2', (d: any) => xScale(d))
+        .attr('y1', 0)
+        .attr('y2', innerHeight);
+    }
+
+    // Horizontal grid lines
+    if (yScale && params.y !== false) {
+      gridGroup.append('g')
+        .selectAll('line')
+        .data(yScale.ticks ? yScale.ticks() : yScale.domain())
+        .join('line')
+        .attr('x1', 0)
+        .attr('x2', innerWidth)
+        .attr('y1', (d: any) => yScale(d))
+        .attr('y2', (d: any) => yScale(d));
+    }
+  }
+
   private async renderMarkGroup(
     container: any,
     markType: string,
@@ -522,7 +629,6 @@ export class CanonicalChartRenderer {
     groupId: string,
     keyFunction?: string | ((d: any) => string)
   ): Promise<void> {
-    // Universal mark rendering - no switch statements
     const markContainer = container.append('g')
       .attr('class', `mark-group mark-${markType}`)
       .attr('data-group', groupId);
@@ -560,40 +666,41 @@ export class CanonicalChartRenderer {
     data: any[],
     params: any
   ): Promise<void> {
-    let pathData: string | null = null;
+    const generator = this.generators.get(container.attr('data-layer-id')) || 
+                    (generatorConfig ? this.createGenerator(generatorConfig) : null);
     
-    if (generatorConfig) {
-      const generator = this.generators.get(container.attr('data-layer-id')) || 
-                      this.createGenerator(generatorConfig);
+    if (markType === 'line' && generator) {
+      // Configure line generator
+      if (encoding.x) generator.x((d: any) => this.getEncodedValue(d, encoding.x));
+      if (encoding.y) generator.y((d: any) => this.getEncodedValue(d, encoding.y));
       
-      // Configure generator with encoding
-      this.configureGenerator(generator, encoding);
-      
-      // Generate path data
-      if (markType === 'line' || markType === 'area') {
-        pathData = generator(data);
-      } else if (markType === 'arc') {
-        // For pie charts, transform data first
-        const pie = d3.pie().value((d: any) => this.getEncodedValue(d, encoding.angle || encoding.y));
-        const arcs = pie(data);
-        
-        container.selectAll('path')
-          .data(arcs)
-          .join('path')
-          .attr('d', generator)
-          .call(selection => this.applyEncoding(selection, encoding, (d: any) => d.data));
-        return;
-      }
-    } else if (encoding.path) {
-      // Direct path data from encoding
-      pathData = data.map(d => this.getEncodedValue(d, encoding.path)).join(' ');
-    }
-
-    if (pathData) {
       const path = container.append('path')
-        .attr('d', pathData);
+        .datum(data)
+        .attr('d', generator)
+        .attr('fill', 'none');
       
-      this.applyEncoding(path, encoding, data[0]);
+      this.applyEncoding(path, encoding);
+    } else if (markType === 'area' && generator) {
+      // Configure area generator
+      if (encoding.x) generator.x((d: any) => this.getEncodedValue(d, encoding.x));
+      if (encoding.y) generator.y1((d: any) => this.getEncodedValue(d, encoding.y));
+      if (encoding.y2) generator.y0((d: any) => this.getEncodedValue(d, encoding.y2));
+      else generator.y0(this.scales.get('y')?.range?.()?.[0] || 0);
+      
+      const path = container.append('path')
+        .datum(data)
+        .attr('d', generator);
+      
+      this.applyEncoding(path, encoding);
+    } else if (markType === 'arc') {
+      // Handle arc/pie charts
+      const pieData = data;
+      
+      container.selectAll('path')
+        .data(pieData)
+        .join('path')
+        .attr('d', generator || d3.arc().innerRadius(0).outerRadius(100))
+        .call(selection => this.applyEncoding(selection, encoding));
     }
   }
 
@@ -650,69 +757,23 @@ export class CanonicalChartRenderer {
     this.applyEncoding(selection, encoding);
   }
 
-  private configureGenerator(generator: any, encoding: EncodingChannels): void {
-    // Configure generator based on encoding channels
-    Object.entries(encoding).forEach(([channel, channelDef]) => {
-      if (!channelDef) return;
-      
-      const methodName = this.getGeneratorMethod(channel);
-      if (methodName && generator[methodName]) {
-        if (channelDef.field) {
-          generator[methodName]((d: any) => this.getEncodedValue(d, channelDef));
-        } else if (channelDef.value !== undefined) {
-          generator[methodName](channelDef.value);
-        }
-      }
-    });
-  }
-
-  private getGeneratorMethod(channel: string): string | null {
-    const methodMap: Record<string, string> = {
-      'x': 'x',
-      'y': 'y',
-      'x2': 'x1',
-      'y2': 'y1',
-      'angle': 'angle',
-      'radius': 'radius',
-      'startAngle': 'startAngle',
-      'endAngle': 'endAngle',
-      'innerRadius': 'innerRadius',
-      'outerRadius': 'outerRadius'
-    };
-    
-    return methodMap[channel] || null;
-  }
-
   private applyShapeAttributes(
     selection: any, 
     markType: string, 
     encoding: EncodingChannels, 
     params: any
   ): void {
-    // Universal attribute mapping
-    const attributeMap: Record<string, string[]> = {
-      'circle': ['cx', 'cy', 'r'],
-      'rect': ['x', 'y', 'width', 'height'],
-      'ellipse': ['cx', 'cy', 'rx', 'ry'],
-      'line': ['x1', 'y1', 'x2', 'y2'],
-      'polygon': ['points'],
-      'symbol': ['d'],
-      'point': ['cx', 'cy']
+    // Universal attribute mapping based on mark type
+    const attributeMap: Record<string, Record<string, string>> = {
+      'circle': { x: 'cx', y: 'cy', size: 'r' },
+      'rect': { x: 'x', y: 'y', width: 'width', height: 'height' },
+      'ellipse': { x: 'cx', y: 'cy', width: 'rx', height: 'ry' },
+      'line': { x: 'x1', y: 'y1', x2: 'x2', y2: 'y2' }
     };
 
-    const attributes = attributeMap[markType] || [];
+    const attributes = attributeMap[markType] || {};
     
-    // Map encoding channels to attributes
-    const channelToAttr: Record<string, string> = {
-      'x': attributes[0] || 'x',
-      'y': attributes[1] || 'y',
-      'x2': attributes[2] || 'x2',
-      'y2': attributes[3] || 'y2',
-      'size': markType === 'circle' ? 'r' : 'width',
-      'radius': 'r'
-    };
-
-    Object.entries(channelToAttr).forEach(([channel, attr]) => {
+    Object.entries(attributes).forEach(([channel, attr]) => {
       const channelDef = encoding[channel as keyof EncodingChannels];
       if (channelDef) {
         selection.attr(attr, (d: any) => this.getEncodedValue(d, channelDef));
@@ -725,18 +786,18 @@ export class CanonicalChartRenderer {
     });
   }
 
-  private applyEncoding(selection: any, encoding: EncodingChannels, defaultData?: any): void {
+  private applyEncoding(selection: any, encoding: EncodingChannels): void {
     Object.entries(encoding).forEach(([channel, channelDef]) => {
       if (!channelDef) return;
       
       const attribute = this.getAttributeForChannel(channel);
       if (attribute) {
-        selection.attr(attribute, (d: any) => this.getEncodedValue(d || defaultData, channelDef));
+        selection.attr(attribute, (d: any) => this.getEncodedValue(d, channelDef));
       } else {
         // Handle style properties
         const styleProperty = this.getStylePropertyForChannel(channel);
         if (styleProperty) {
-          selection.style(styleProperty, (d: any) => this.getEncodedValue(d || defaultData, channelDef));
+          selection.style(styleProperty, (d: any) => this.getEncodedValue(d, channelDef));
         }
       }
     });
@@ -744,16 +805,17 @@ export class CanonicalChartRenderer {
 
   private getAttributeForChannel(channel: string): string | null {
     const attributeMap: Record<string, string> = {
-      'x': 'x',
-      'y': 'y',
-      'x2': 'x2',
-      'y2': 'y2',
-      'color': 'fill',
-      'stroke': 'stroke',
-      'strokeWidth': 'stroke-width',
-      'opacity': 'opacity',
-      'size': 'r', // default, can be overridden
-      'text': 'text-content'
+      'x': 'x', 'y': 'y', 'x2': 'x2', 'y2': 'y2',
+      'cx': 'cx', 'cy': 'cy', 'r': 'r',
+      'width': 'width', 'height': 'height',
+      'color': 'fill', 'fill': 'fill',
+      'stroke': 'stroke', 'strokeWidth': 'stroke-width',
+      'opacity': 'opacity', 'strokeOpacity': 'stroke-opacity',
+      'size': 'r', 'd': 'd',
+      'startAngle': 'data-start-angle',
+      'endAngle': 'data-end-angle',
+      'innerRadius': 'data-inner-radius',
+      'outerRadius': 'data-outer-radius'
     };
     
     return attributeMap[channel] || null;
@@ -813,7 +875,14 @@ export class CanonicalChartRenderer {
           return Math.log(val);
         case 'sqrt':
           return Math.sqrt(val);
+        case 'abs':
+          return Math.abs(val);
+        case 'negate':
+          return -val;
         default:
+          if (transform.expression && typeof transform.expression === 'function') {
+            return transform.expression(val, data);
+          }
           return val;
       }
     }, value);
@@ -854,10 +923,8 @@ export class CanonicalChartRenderer {
   }
 
   private evaluateCondition(condition: any): boolean {
-    // Evaluate rendering conditions
     switch (condition.type) {
       case 'expression':
-        // Simple expression evaluation
         return Boolean(condition.test);
       case 'function':
         return typeof condition.test === 'function' ? condition.test(this.state) : true;
@@ -878,7 +945,7 @@ export class CanonicalChartRenderer {
   }
 
   private applyBehavior(behavior: any): void {
-    const { type, target, params = {}, handlers = {} } = behavior;
+    const { type, target, params = {} } = behavior;
     
     // Get target elements
     const targets = target ? 
@@ -890,79 +957,12 @@ export class CanonicalChartRenderer {
       case 'zoom':
         const zoom = d3.zoom();
         if (params.scaleExtent) zoom.scaleExtent(params.scaleExtent);
-        if (params.translateExtent) zoom.translateExtent(params.translateExtent);
-        
-        zoom.on('zoom', (event) => {
-          if (handlers.zoom) {
-            this.executeHandler(handlers.zoom, event);
-          }
-        });
-        
         targets.call(zoom);
-        break;
-      
-      case 'brush':
-        const brush = params.type === '1d' ? d3.brushX() : d3.brush();
-        
-        brush.on('brush end', (event) => {
-          if (handlers.brush) {
-            this.executeHandler(handlers.brush, event);
-          }
-        });
-        
-        targets.call(brush);
         break;
       
       case 'drag':
         const drag = d3.drag();
-        
-        ['start', 'drag', 'end'].forEach(eventType => {
-          if (handlers[eventType]) {
-            drag.on(eventType, (event, d) => {
-              this.executeHandler(handlers[eventType], event, d);
-            });
-          }
-        });
-        
         targets.call(drag);
-        break;
-      
-      case 'hover':
-      case 'click':
-        ['mouseover', 'mouseout', 'click'].forEach(eventType => {
-          if (handlers[eventType]) {
-            targets.on(eventType, (event, d) => {
-              this.executeHandler(handlers[eventType], event, d);
-            });
-          }
-        });
-        break;
-    }
-  }
-
-  private executeHandler(handler: any, event: any, data?: any): void {
-    if (typeof handler.action === 'function') {
-      handler.action(event, data);
-    } else if (typeof handler.action === 'string') {
-      // Execute predefined action
-      this.executePredefinedAction(handler.action, event, data, handler.params);
-    }
-  }
-
-  private executePredefinedAction(action: string, event: any, data: any, params: any): void {
-    switch (action) {
-      case 'highlight':
-        // Highlight logic
-        break;
-      case 'filter':
-        // Filter logic
-        break;
-      case 'zoom':
-        // Zoom logic
-        break;
-      case 'update':
-        // Update chart
-        this.render();
         break;
     }
   }
@@ -971,18 +971,10 @@ export class CanonicalChartRenderer {
     if (!this.schema.animations) return;
     
     this.schema.animations.forEach(animation => {
-      this.startAnimation(animation);
+      if (animation.trigger === 'load') {
+        this.executeAnimationSequence(animation.sequence, animation.duration || 1000, animation.delay || 0, animation.easing || 'easeLinear');
+      }
     });
-  }
-
-  private startAnimation(animation: any): void {
-    const { trigger, sequence, duration = 1000, delay = 0, easing = 'easeLinear' } = animation;
-    
-    if (trigger === 'load') {
-      // Start immediately
-      this.executeAnimationSequence(sequence, duration, delay, easing);
-    }
-    // Other triggers would be handled by behaviors
   }
 
   private executeAnimationSequence(sequence: any[], duration: number, delay: number, easing: string): void {
@@ -995,8 +987,8 @@ export class CanonicalChartRenderer {
       targets.transition()
         .duration(stepDuration)
         .delay(stepDelay)
-        .ease(d3[easing as keyof typeof d3] as any)
-        .call(transition => {
+        .ease((d3 as any)[easing] || d3.easeLinear)
+        .call((transition: any) => {
           Object.entries(step.properties).forEach(([prop, value]) => {
             if (this.isSVGAttribute(prop)) {
               transition.attr(prop, value);
@@ -1006,57 +998,6 @@ export class CanonicalChartRenderer {
           });
         });
     });
-  }
-
-  // Helper methods for specific transform types
-  private setupForceData(data: any[], params: any): any[] {
-    // Transform data for force simulation
-    return data;
-  }
-
-  private applyProjection(data: any[], params: any): any[] {
-    // Apply geographic projection
-    return data;
-  }
-
-  private generateContours(data: any[], params: any): any[] {
-    // Generate contour data
-    return data;
-  }
-
-  private generateVoronoi(data: any[], params: any): any[] {
-    // Generate Voronoi diagram
-    return data;
-  }
-
-  private generateDelaunay(data: any[], params: any): any[] {
-    // Generate Delaunay triangulation
-    return data;
-  }
-
-  private createClipPath(defs: any, clip: any): void {
-    const clipPath = defs.append('clipPath')
-      .attr('id', clip.id);
-    
-    switch (clip.type) {
-      case 'rect':
-        clipPath.append('rect')
-          .attr('x', clip.params.x || 0)
-          .attr('y', clip.params.y || 0)
-          .attr('width', clip.params.width)
-          .attr('height', clip.params.height);
-        break;
-      case 'circle':
-        clipPath.append('circle')
-          .attr('cx', clip.params.cx || 0)
-          .attr('cy', clip.params.cy || 0)
-          .attr('r', clip.params.r);
-        break;
-      case 'path':
-        clipPath.append('path')
-          .attr('d', clip.params.d);
-        break;
-    }
   }
 
   // Public API methods
@@ -1076,13 +1017,5 @@ export class CanonicalChartRenderer {
 
   public getData(name: string = 'main'): any[] {
     return this.dataCache.get(name) || [];
-  }
-
-  public setState(key: string, value: any): void {
-    this.state.set(key, value);
-  }
-
-  public getState(key: string): any {
-    return this.state.get(key);
   }
 }

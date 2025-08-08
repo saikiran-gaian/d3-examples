@@ -69,6 +69,14 @@ export interface VisualSpace {
   width: number;
   height: number;
   
+  // Margins
+  margin?: {
+    top?: number;
+    right?: number;
+    bottom?: number;
+    left?: number;
+  };
+  
   // Coordinate systems
   coordinates?: CoordinateSystem[];
   
@@ -93,7 +101,7 @@ export interface CoordinateSystem {
 
 export interface ScaleDefinition {
   // Scale function type
-  type: 'linear' | 'log' | 'sqrt' | 'pow' | 'time' | 'utc' | 'ordinal' | 'band' | 'point' | 'sequential' | 'diverging' | 'threshold' | 'quantile' | 'quantize' | 'identity';
+  type: 'linear' | 'log' | 'sqrt' | 'pow' | 'time' | 'utc' | 'ordinal' | 'band' | 'point' | 'sequential' | 'diverging' | 'threshold' | 'quantile' | 'quantize' | 'identity' | 'radial';
   
   // Domain and range
   domain?: any[];
@@ -147,7 +155,7 @@ export interface LayerDefinition {
 }
 
 export interface MarkDefinition {
-  type: string; // circle, rect, line, path, text, arc, geoshape, etc.
+  type: string; // circle, rect, line, path, text, arc, geoshape, axis, grid, etc.
   
   // Mark-specific parameters
   params?: Record<string, any>;
@@ -161,7 +169,7 @@ export interface MarkDefinition {
 }
 
 export interface GeneratorDefinition {
-  type: 'line' | 'area' | 'arc' | 'pie' | 'stack' | 'force' | 'tree' | 'pack' | 'treemap' | 'sankey' | 'chord' | 'path' | 'symbol';
+  type: 'line' | 'area' | 'arc' | 'pie' | 'stack' | 'force' | 'tree' | 'pack' | 'treemap' | 'sankey' | 'chord' | 'path' | 'symbol' | 'hexbin' | 'contour' | 'voronoi' | 'delaunay';
   params?: Record<string, any>;
   
   // Curve types for line/area
@@ -181,20 +189,35 @@ export interface EncodingChannels {
   // Polar coordinates
   angle?: ChannelDefinition;
   radius?: ChannelDefinition;
+  startAngle?: ChannelDefinition;
+  endAngle?: ChannelDefinition;
+  innerRadius?: ChannelDefinition;
+  outerRadius?: ChannelDefinition;
   
   // Visual channels
   color?: ChannelDefinition;
+  fill?: ChannelDefinition;
   opacity?: ChannelDefinition;
   size?: ChannelDefinition;
   shape?: ChannelDefinition;
   stroke?: ChannelDefinition;
   strokeWidth?: ChannelDefinition;
   strokeDash?: ChannelDefinition;
+  strokeOpacity?: ChannelDefinition;
   
   // Text channels
   text?: ChannelDefinition;
   fontSize?: ChannelDefinition;
   fontWeight?: ChannelDefinition;
+  textAnchor?: ChannelDefinition;
+  
+  // Geometric channels
+  width?: ChannelDefinition;
+  height?: ChannelDefinition;
+  r?: ChannelDefinition;
+  cx?: ChannelDefinition;
+  cy?: ChannelDefinition;
+  d?: ChannelDefinition; // path data
   
   // Custom channels (for specialized marks)
   [key: string]: ChannelDefinition | undefined;
@@ -228,8 +251,9 @@ export interface ChannelDefinition {
 }
 
 export interface ChannelTransform {
-  type: 'scale' | 'offset' | 'multiply' | 'add' | 'log' | 'sqrt' | 'custom';
+  type: 'scale' | 'offset' | 'multiply' | 'add' | 'log' | 'sqrt' | 'abs' | 'negate' | 'custom';
   params?: Record<string, any>;
+  expression?: string | ((value: any, data: any) => any);
 }
 
 export interface ConditionalEncoding {
