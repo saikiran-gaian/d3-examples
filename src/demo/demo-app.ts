@@ -1,6 +1,7 @@
 import { CanonicalChartRenderer } from '../renderer/canonical-renderer';
 import { CanonicalChartSchema } from '../types/canonical-schema';
-import { chartSchemas, getAllChartTypes } from '../examples/chart-schemas';
+import { allChartSchemas, getAllChartTypes } from '../examples/chart-schemas';
+import { getAllCompleteChartTypes } from '../examples/complete-chart-schemas';
 
 export class DemoApp {
   private currentRenderer: CanonicalChartRenderer | null = null;
@@ -18,7 +19,7 @@ export class DemoApp {
   private setupUI(): void {
     // Setup chart type selector
     const selector = document.getElementById('chart-selector') as HTMLSelectElement;
-    const types = getAllChartTypes();
+    const types = [...getAllChartTypes(), ...getAllCompleteChartTypes()];
     
     types.forEach(type => {
       const option = document.createElement('option');
@@ -70,7 +71,7 @@ export class DemoApp {
   }
 
   private loadChart(type: string): void {
-    const schema = chartSchemas[type];
+    const schema = allChartSchemas[type];
     if (!schema) return;
 
     this.currentSchema = schema;
